@@ -35,9 +35,9 @@ header h1 {
 .intro p {
   font-size: 1.1em; line-height:1.6em; text-align: center;
 }
-.name-input { margin: 20px 0; }
-input[type="text"] {
-  padding: 10px; width: 100%; box-sizing: border-box;
+.input-group { margin: 20px 0; display: flex; flex-direction: column; align-items: center; }
+.input-group input, .input-group select {
+  padding: 10px; width: 220px; box-sizing: border-box;
   margin-bottom: 15px; border: 1px solid #ccc; border-radius: 5px; font-size: 1.1em;
 }
 .button {
@@ -98,6 +98,19 @@ input[type="text"] {
   font-size:1.1em; margin-bottom:20px; text-align:left; font-style: italic; color:#555; max-width:600px;
   margin:10px auto; background:#fff8e6; border:1px solid #f6d77a; border-radius:5px; padding:15px; display:none;
 }
+.result-area { 
+  text-align: center; 
+}
+.result-area h2 {
+  font-size: 2em;
+  color: #424874;
+  margin-bottom: 20px;
+}
+.result-area p { 
+  margin: 10px 0; 
+  font-size: 1.2em;
+  color: #424874;
+}
 footer {
   text-align:center; color:#030303; margin:20px 0; font-size:1em;
 }
@@ -107,6 +120,9 @@ footer {
   .explanation { font-size:1em; }
 }
 </style>
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
 </head>
 <body>
 <header>
@@ -118,10 +134,16 @@ footer {
     <h2 style="font-family:'Space Mono', monospace; font-size:1.6em; text-align:center;">Welcome!</h2>
     <p>
       Practice converting weeks to days, days to hours, and hours to minutes.<br>
-      You have 20 minutes to answer 50 questions. Good luck!
+      You have <strong>20 minutes</strong> to answer <strong>50 questions</strong>. Good luck!
     </p>
-    <div class="name-input">
+    <div class="input-group">
       <input type="text" id="playerName" placeholder="Your Name" />
+      <select id="division">
+        <option value="" disabled selected>Select Division</option>
+        <option value="A">Division A</option>
+        <option value="B">Division B</option>
+      </select>
+      <input type="number" id="rollNo" placeholder="Enter Roll Number" />
     </div>
     <button class="button" onclick="startQuiz()">Start Game</button>
   </div>
@@ -154,11 +176,11 @@ footer {
     </div>
   </div>
 
-  <div class="result-area" id="result-area">
+  <div class="result-area hidden" id="result-area">
     <h2>Game Completed!</h2>
-    <p id="final-message"></p>
-    <p id="final-score"></p>
-    <p>Thank you for playing!</p>
+    <p id="final-message">Well done, Player!</p>
+    <p id="final-score">Your final score: 0 out of 500</p>
+    <p>Your record is saved. No need for sharing the screenshot to Saeed Sir.</p>
   </div>
 </div>
 
@@ -167,17 +189,22 @@ footer {
 </footer>
 
 <script>
-/*
-  We avoid 2-digit × 2-digit:
-    1..15 × 7 (Weeks→Days)
-    1..9 × 24 (Days→Hours)
-    1..9 × 60 (Hours→Minutes)
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyB-RDLOoTlaio0VgtFh7eencMr9ekdFEEk",
+  authDomain: "test-app-1-6ade5.firebaseapp.com",
+  databaseURL: "https://test-app-1-6ade5-default-rtdb.firebaseio.com",
+  projectId: "test-app-1-6ade5",
+  storageBucket: "test-app-1-6ade5.firebasestorage.app",
+  messagingSenderId: "938447574937",
+  appId: "1:938447574937:web:65c1c53a12c665988b2508",
+  measurementId: "G-FKNLFZH4G9"
+};
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const database = firebase.database();
 
-  We randomize whether a question is MC or text,
-  and store the correct answer as a string for MC
-  so we never get "undefined".
-*/
-
+// Utility functions
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -198,6 +225,7 @@ function hideInfo(){
   infoEl.style.display = "none";
 }
 
+// Generate distractors
 function getDistractors(correct, count, varyRange) {
   let distractors = [];
   while(distractors.length < count){
@@ -209,7 +237,7 @@ function getDistractors(correct, count, varyRange) {
   return distractors;
 }
 
-// Generate question objects:
+// Generate question objects
 function genWeeksToDays(){
   let w = randomInt(1,15);
   let correct = w*7;
@@ -234,12 +262,7 @@ function genHoursToMinutes(){
   return buildQuestion(question, correct, distractors, `${h} × 60 = ${correct}`);
 }
 
-/*
-  buildQuestion():
-    - isMC: 50% chance for multiple choice
-    - for MC: store `options` as strings, track `correctIndex`
-    - for text: store the numeric correctAnswer
-*/
+// Build question object
 function buildQuestion(question, correctNum, distractors, explanation){
   let isMC = Math.random() < 0.5;
   if(isMC){
@@ -280,41 +303,79 @@ for(let i=0; i<15; i++){
 }
 shuffleArray(allQuestions);
 let questions = allQuestions.slice(0,50);
+const totalQuestions = 50;
 
 let playerName="";
+let division="";
+let rollNo="";
 let totalTime=20*60;
 let timerInterval=null;
 let currentQuestionIndex=0;
 let score=0;
 let mode="check";
+let userKey = "";
 
 function startQuiz(){
   hideInfo();
   const nameInput = document.getElementById("playerName").value.trim();
+  const divisionVal = document.getElementById("division").value;
+  const rollNoVal = document.getElementById("rollNo").value.trim();
+
   if(!nameInput){
     showInfo("Please enter your name.");
     return;
   }
+  if(!divisionVal){
+    showInfo("Please select your division.");
+    return;
+  }
+  if(!rollNoVal){
+    showInfo("Please enter your roll number.");
+    return;
+  }
+
   playerName = nameInput;
+  division = divisionVal;
+  rollNo = rollNoVal;
+  userKey = `${division}_${rollNo}`;
+
   document.getElementById("intro").classList.remove("active");
   document.getElementById("quiz-area").classList.add("active");
   startTimer();
   showQuestion();
+
+  // Initialize or reset user data in Firebase
+  const initialData = {
+    name: playerName,
+    division: division,
+    rollNo: rollNo,
+    score: 0,
+    questionsCompleted: 0,
+    quiz: "time7",
+    timeStarted: new Date().toISOString(),
+    lastAnswered: new Date().toISOString(),
+    totalQuestions: totalQuestions
+  };
+  database.ref(`results/${userKey}`).set(initialData);
 }
 
 function startTimer(){
-  const timerEl = document.getElementById("timer");
+  updateTimerUI();
   timerInterval = setInterval(()=>{
-    if(totalTime<=0){
+    totalTime--;
+    if(totalTime <= 0){
       clearInterval(timerInterval);
       endQuiz();
       return;
     }
-    totalTime--;
-    let m=Math.floor(totalTime/60);
-    let s=totalTime%60;
-    timerEl.textContent="Time: "+m+":"+pad(s);
+    updateTimerUI();
   },1000);
+}
+
+function updateTimerUI(){
+  const minutes = Math.floor(totalTime / 60);
+  const seconds = totalTime % 60;
+  document.getElementById("timer").textContent = `Time: ${minutes}:${seconds < 10 ? "0"+seconds : seconds}`;
 }
 
 function showQuestion(){
@@ -430,6 +491,16 @@ function checkAnswer(){
   document.getElementById("scoreboard").textContent = "Score: " + score;
   document.getElementById("mainBtn").textContent = "Next Question";
   mode="next";
+
+  // Update score and questionsCompleted in Firebase after each answer
+  const timestamp = new Date().toISOString();
+  const questionsCompleted = currentQuestionIndex + 1;
+  const updateData = {
+    score: score,
+    questionsCompleted: questionsCompleted,
+    lastAnswered: timestamp
+  };
+  database.ref(`results/${userKey}`).update(updateData);
 }
 
 function nextQuestion(){
@@ -445,9 +516,19 @@ function endQuiz(){
   clearInterval(timerInterval);
   document.getElementById("quiz-area").classList.remove("active");
   document.getElementById("result-area").classList.add("active");
-  document.getElementById("final-message").textContent = "Well done, " + playerName + "!";
+  document.getElementById("final-message").textContent = `Well done, ${playerName}!`;
   document.getElementById("final-score").textContent =
-    "Time 7: Your Score: " + score + " out of " + (questions.length*10);
+    `Time7: Your Score: ${score} out of ${questions.length*10}`;
+  
+  // Update final result in Firebase
+  const timestamp = new Date().toISOString();
+  const finalResultData = {
+    finalScore: score,
+    timeEnded: timestamp,
+    totalTime: 20*60 - totalTime,
+    questionsCompleted: questions.length
+  };
+  database.ref(`results/${userKey}`).update(finalResultData);
 }
 </script>
 </body>
